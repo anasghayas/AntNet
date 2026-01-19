@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+redis
+pydantic
+requests
+pyotp
+python-dotenv
+threading
+psutil
