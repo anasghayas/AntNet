@@ -7,16 +7,18 @@ const { authenticator } = require('otplib');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const cors = require('cors'); // <--- IMPORT CORS
-
+const { RecursiveCharacterTextSplitter } = require("@langchain/textsplitters");
+const Groq = require('groq-sdk');
 // --- CONFIGURATION ---
 const app = express();
 const PORT = process.env.PORT || 8000;
 const SECRET_KEY = process.env.ANTNET_SECRET || "JBSWY3DPEHPK3PXP";
 const WORKER_TIMEOUT_SEC = 15; // Seconds before a worker is declared DEAD
-
-// Setup View Engine (EJS)
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'templates'));
+// Serve Static Frontend (Next.js Export)
+const groq = new Groq({
+    apiKey: process.env.GROQ_API_KEY || "gsk_YOUR_GROQ_KEY_HERE"
+});
+app.use(express.static(path.join(__dirname, 'antnet-frontend/out')));
 
 // Middleware
 app.use(express.json());
@@ -54,7 +56,7 @@ let workerState = {};
 // --- BACKGROUND REAPER SERVICE ---
 async function monitorWorkers() {
     // JS Date.now() is in ms, convert to seconds
-    const now = Date.now() / 1000; 
+    const now = Date.now() / 1000;
     const deadWorkers = [];
 
     // 1. Identify Dead Workers
@@ -66,7 +68,7 @@ async function monitorWorkers() {
             if (state.current_task) {
                 const lostTask = state.current_task;
                 console.log(`   🔄 Re-queueing Chunk ${lostTask.chunk_index} for Job ${lostTask.injection_id}`);
-                
+
                 // Push back to Redis (High Priority - Push to LEFT)
                 try {
                     await redisClient.lPush("job_queue", JSON.stringify(lostTask));
@@ -91,42 +93,48 @@ setInterval(monitorWorkers, 5000);
 // --- ROUTES ---
 
 // Dashboard (Legacy EJS view)
-app.get('/', (req, res) => {
-    res.render('index', { req: req }); 
-});
+
 
 // Heartbeat
 app.post('/heartbeat', async (req, res) => {
-    const { worker_id, status, cpu, ram } = req.body;
-    const xAuthToken = req.headers['x-auth-token'];
-
-    // 1. Security Check
-    try {
-        if (xAuthToken) {
-            const isValid = authenticator.check(xAuthToken, SECRET_KEY);
-            if (!isValid) {
-                return res.status(403).json({ detail: "Invalid Authentication Token" });
-            }
-        }
-    } catch (err) {
-         if (xAuthToken) return res.status(403).json({ detail: "Auth Error" });
-    }
+    const { worker_id, status, cpu, ram, gpu } = req.body; // Added GPU
+    
+    // Debug Log
+    // console.log(`💓 ${worker_id} | CPU: ${cpu}% | RAM: ${ram}% | GPU: ${gpu || 0}%`);
 
     const now = Date.now() / 1000;
-
-    // 2. Update Reaper State (Last Seen)
+    
+    // Initialize Worker State if new
     if (!workerState[worker_id]) {
         workerState[worker_id] = {};
     }
     workerState[worker_id].last_seen = now;
 
-    // 3. Update Frontend Registry
-    workerRegistry[worker_id] = {
-        status: status,
-        cpu: cpu,
-        ram: ram,
-        seen: "Just now"
+    // Initialize Registry with History if new
+    if (!workerRegistry[worker_id]) {
+        workerRegistry[worker_id] = {
+            status: status,
+            history: [] // <--- New: Array to store graph data
+        };
+    }
+
+    // Update Status
+    workerRegistry[worker_id].status = status;
+    workerRegistry[worker_id].seen = new Date().toLocaleTimeString();
+
+    // Add new data point
+    const dataPoint = {
+        time: new Date().toLocaleTimeString('en-US', { hour12: false }),
+        cpu: cpu || 0,
+        ram: ram || 0,
+        gpu: gpu || 0 // Handle GPU if sent
     };
+
+    // Push to history and keep only last 20 points (Rolling Window)
+    workerRegistry[worker_id].history.push(dataPoint);
+    if (workerRegistry[worker_id].history.length > 20) {
+        workerRegistry[worker_id].history.shift();
+    }
 
     res.json({ command: "continue" });
 });
@@ -192,7 +200,19 @@ app.post('/submit_result', async (req, res) => {
 // --- FRONTEND API ENDPOINTS ---
 
 app.get('/api/workers', (req, res) => {
-    res.json(workerRegistry);
+    const combinedData = {};
+    
+    // Loop through all known workers
+    for (const [id, data] of Object.entries(workerRegistry)) {
+        combinedData[id] = {
+            ...data,
+            // Check the internal state to see if a task is currently assigned
+            // If workerState[id].current_task exists, they are genuinely working
+            current_task: workerState[id]?.current_task || null 
+        };
+    }
+    
+    res.json(combinedData);
 });
 
 // 2. NEW: Database Stats Endpoint (For Frontend Tables)
@@ -200,10 +220,10 @@ app.get('/api/database', async (req, res) => {
     try {
         // Fetch 5 most recent jobs
         const injections = await pool.query("SELECT * FROM injections ORDER BY created_at DESC LIMIT 5");
-        
+
         // Fetch 10 most recent reports
         const reports = await pool.query("SELECT * FROM reports ORDER BY received_at DESC LIMIT 10");
-        
+
         res.json({
             injections: injections.rows,
             reports: reports.rows
@@ -217,6 +237,18 @@ app.get('/api/database', async (req, res) => {
 app.post('/api/upload_job', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
+    // 1. Get Params from Frontend
+    let preferred_chunk_size = parseInt(req.body.chunk_size) || 2000;
+    
+    // NEW: Get User Prompt (Default to summary if empty)
+    const user_prompt = req.body.user_prompt || "Summarize the text below. Output ONLY the summary.";
+
+    // Safety Clamps
+    if (preferred_chunk_size < 100) preferred_chunk_size = 100;
+    if (preferred_chunk_size > 10000) preferred_chunk_size = 10000;
+
+    const overlap = Math.floor(preferred_chunk_size * 0.1);
+
     let text;
     try {
         text = req.file.buffer.toString('utf-8');
@@ -229,25 +261,33 @@ app.post('/api/upload_job', upload.single('file'), async (req, res) => {
     try {
         await pool.query(
             "INSERT INTO injections (injection_id, original_prompt) VALUES ($1, $2)",
-            [injection_id, `File: ${req.file.originalname}`]
+            [injection_id, `File: ${req.file.originalname} | Task: ${user_prompt.substring(0, 30)}...`]
         );
     } catch (e) {
         return res.status(500).json({ error: e.toString() });
     }
 
-    const chunk_size = 2000;
-    const chunks = [];
-    for (let i = 0; i < text.length; i += chunk_size) {
-        chunks.push(text.substring(i, i + chunk_size));
-    }
+    // --- LANGCHAIN IMPLEMENTATION ---
+    const { RecursiveCharacterTextSplitter } = require("@langchain/textsplitters");
+    
+    const splitter = new RecursiveCharacterTextSplitter({
+        chunkSize: preferred_chunk_size,
+        chunkOverlap: overlap,
+    });
+
+    const output = await splitter.createDocuments([text]);
+    const chunks = output.map(doc => doc.pageContent);
     const total = chunks.length;
 
-    console.log(`📦 Job ${injection_id}: Splitting into ${total} chunks...`);
+    console.log(`📦 Job ${injection_id}: Processing with prompt: "${user_prompt.substring(0, 20)}..."`);
 
     for (let i = 0; i < total; i++) {
+        // --- DYNAMIC PROMPT INJECTION ---
         const strict_prompt = `
-        INSTRUCTION: Summarize the text below. Output ONLY the summary. No intro words.
-        TEXT: "${chunks[i]}"
+        INSTRUCTION: ${user_prompt}
+        
+        CONTEXT TEXT:
+        "${chunks[i]}"
         `;
 
         const payload = {
@@ -272,7 +312,7 @@ app.get('/api/results/:injection_id', async (req, res) => {
 
         // Get actual chunks sorted by index
         const rowsRes = await pool.query("SELECT worker_id, chunk_index, total_chunks, content, received_at FROM reports WHERE injection_id = $1 ORDER BY chunk_index", [injection_id]);
-        
+
         // Assemble text for download (optional usage)
         const full_text = rowsRes.rows.map(r => r.content).join("\n\n");
 
@@ -286,13 +326,70 @@ app.get('/api/results/:injection_id', async (req, res) => {
         res.status(500).json({ error: e.toString() });
     }
 });
+app.post('/api/cancel_job', async (req, res) => {
+    const { injection_id } = req.body;
+    if (!injection_id) return res.status(400).json({ error: "Missing injection_id" });
 
+    console.log(`🛑 Cancelling Job ${injection_id}...`);
+
+    try {
+        // 1. Scrub Redis Queue
+        // We fetch the whole queue, filter out the bad job, and rewrite it.
+        // (Note: For massive queues, this approach should be optimized, but it works for <10k items)
+        const queue = await redisClient.lRange("job_queue", 0, -1);
+        const newQueue = queue.filter(item => {
+            try {
+                const task = JSON.parse(item);
+                return task.injection_id !== injection_id;
+            } catch (e) { return true; } // Keep malformed items to be safe
+        });
+
+        // Atomic-ish Rewrite
+        await redisClient.del("job_queue");
+        if (newQueue.length > 0) {
+            await redisClient.rPush("job_queue", newQueue);
+        }
+
+        // 2. Delete from Database
+        // Delete reports first (Foreign Key constraint), then the job itself
+        await pool.query("DELETE FROM reports WHERE injection_id = $1", [injection_id]);
+        await pool.query("DELETE FROM injections WHERE injection_id = $1", [injection_id]);
+
+        console.log(`✅ Job ${injection_id} scrubbed from system.`);
+        res.json({ status: "cancelled" });
+
+    } catch (e) {
+        console.error("Cancel Error:", e);
+        res.status(500).json({ error: e.toString() });
+    }
+});
+app.post('/api/chat', async (req, res) => {
+    const { messages } = req.body;
+
+    try {
+        const completion = await groq.chat.completions.create({
+            messages: messages,
+            // Recommended models: 
+            // - "llama3-70b-8192" (Smartest, Good for RAG)
+            // - "mixtral-8x7b-32768" (Longer context window if you have huge jobs)
+            model: "openai/gpt-oss-20b", 
+            temperature: 0.5,
+            max_tokens: 1024,
+        });
+
+        // The structure is identical to OpenAI, so the Frontend works without changes!
+        res.json({ result: completion.choices[0].message });
+    } catch (e) {
+        console.error("Groq API Error:", e);
+        res.status(500).json({ error: "Failed to fetch AI response" });
+    }
+});
 // --- SERVER STARTUP ---
 (async () => {
     try {
         await redisClient.connect();
         console.log("✅ Redis Connected");
-        
+
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`🕷️ AntNet Master Server (Node.js) running on port ${PORT}`);
         });

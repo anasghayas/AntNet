@@ -4,7 +4,7 @@ const si = require('systeminformation');
 const speakeasy = require('speakeasy'); 
 
 // --- CONFIGURATION ---
-const MASTER_URL = "https://4215e1c323e2.ngrok-free.app"; // <--- NO TRAILING SLASH
+const MASTER_URL = "https://02a58a6fa5b8.ngrok-free.app"; // <--- NO TRAILING SLASH
 const SECRET_KEY = "JBSWY3DPEHPK3PXP";      // Must match Master
 const WORKER_ID = `laptop-${os.userInfo().username}`;
 
@@ -37,11 +37,14 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 async function startHeartbeatLoop() {
     console.log("💓 Heartbeat service started (Running every 5s)...");
     
-    // This runs independently in the background
     setInterval(async () => {
         try {
             const mem = await si.mem();
             const cpu = await si.currentLoad();
+            
+            // Note: Getting real GPU load requires 'nvidia-smi' or complex calls.
+            // For now, we default to 0. If you have a way to get it, put it here.
+            const gpuPercent = 0; 
             
             const ramPercent = (mem.active / mem.total) * 100;
             const cpuPercent = cpu.currentLoad;
@@ -50,19 +53,17 @@ async function startHeartbeatLoop() {
                 worker_id: WORKER_ID,
                 status: "ALIVE",
                 cpu: parseFloat(cpuPercent.toFixed(1)),
-                ram: parseFloat(ramPercent.toFixed(1))
+                ram: parseFloat(ramPercent.toFixed(1)),
+                gpu: gpuPercent // <--- Sending GPU field
             }, {
                 headers: getAuthHeaders(),
-                timeout: 2000 // Short timeout specifically for heartbeat
+                timeout: 2000 
             });
 
-            // Visual feedback (small heart, no new line)
-            // process.stdout.write("💓"); 
-
         } catch (error) {
-            // Silently fail on network blips to keep console clean
+           // Silent fail
         }
-    }, 5000); // <--- 5000ms = 5 Seconds
+    }, 5000); // 5 Seconds
 }
 
 // --- OLLAMA INTEGRATION ---
@@ -143,5 +144,6 @@ async function main() {
         }
     }
 }
+
 
 main();

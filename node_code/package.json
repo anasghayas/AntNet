@@ -11,6 +11,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@langchain/textsplitters": "^1.0.1",
     "axios": "^1.13.2",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
@@ -18,11 +19,16 @@
     "ejs": "^4.0.1",
     "express": "^5.2.1",
     "framer-motion": "^12.27.1",
+    "groq-sdk": "^0.37.0",
+    "langchain": "^1.2.11",
     "lucide-react": "^0.562.0",
     "multer": "^2.0.2",
     "otplib": "^13.1.1",
     "pg": "^8.17.1",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.0",
     "redis": "^5.10.0",
+    "remark-gfm": "^4.0.1",
     "systeminformation": "^5.30.5",
     "uuid": "^13.0.0"
   }
