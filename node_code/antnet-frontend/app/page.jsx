@@ -9,7 +9,7 @@ import { twMerge } from "tailwind-merge";
 
 // --- UTILS ---
 function cn(...inputs) { return twMerge(clsx(inputs)); }
-const API_URL = "http://localhost:8000"; 
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 // --- ASSETS ---
 // Idle: Tired Minion
