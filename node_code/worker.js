@@ -4,7 +4,7 @@ const si = require('systeminformation');
 const speakeasy = require('speakeasy'); 
 
 // --- CONFIGURATION ---
-const MASTER_URL = "https://02a58a6fa5b8.ngrok-free.app"; // <--- NO TRAILING SLASH
+const MASTER_URL = "https://antnet.zeabur.app"; // <--- NO TRAILING SLASH
 const SECRET_KEY = "JBSWY3DPEHPK3PXP";      // Must match Master
 const WORKER_ID = `laptop-${os.userInfo().username}`;
 

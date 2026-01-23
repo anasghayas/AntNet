@@ -29,7 +29,7 @@ app.use(express.urlencoded({ extended: true }));
 // 1. ENABLE CORS 
 app.use(cors({
     origin: '*',
-    methods: ['GET', 'POST']
+    methods: ['GET', 'POST','PUT','DELETE']
 }));
 
 // Database Config (Postgres) - Uses DATABASE_URL from .env
