@@ -8,7 +8,7 @@ echo ===================================================
 echo.
 
 :: -----------------------------------------------------
-:: STEP 1: CHECKING FOR OLLAMA
+:: STEP 1: CHECK FOR OLLAMA
 :: -----------------------------------------------------
 echo [1/3] Checking system requirements...
 where ollama >nul 2>nul
