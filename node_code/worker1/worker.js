@@ -1,7 +1,7 @@
 const axios = require('axios');
 const os = require('os');
 const si = require('systeminformation');
-const speakeasy = require('speakeasy'); 
+const speakeasy = require('speakeasy');
 
 // --- CONFIGURATION ---
 const MASTER_URL = "https://antnet.zeabur.app"; // <--- NO TRAILING SLASH
@@ -19,7 +19,7 @@ function getAuthHeaders() {
             secret: SECRET_KEY,
             encoding: 'base32'
         });
-        
+
         return {
             "x-auth-token": token,
             "ngrok-skip-browser-warning": "69420",
@@ -36,16 +36,16 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function startHeartbeatLoop() {
     console.log("💓 Heartbeat service started (Running every 5s)...");
-    
+
     setInterval(async () => {
         try {
             const mem = await si.mem();
             const cpu = await si.currentLoad();
-            
+
             // Note: Getting real GPU load requires 'nvidia-smi' or complex calls.
             // For now, we default to 0. If you have a way to get it, put it here.
-            const gpuPercent = 0; 
-            
+            const gpuPercent = 0;
+
             const ramPercent = (mem.active / mem.total) * 100;
             const cpuPercent = cpu.currentLoad;
 
@@ -57,11 +57,11 @@ async function startHeartbeatLoop() {
                 gpu: gpuPercent // <--- Sending GPU field
             }, {
                 headers: getAuthHeaders(),
-                timeout: 2000 
+                timeout: 2000
             });
 
         } catch (error) {
-           // Silent fail
+            // Silent fail
         }
     }, 5000); // 5 Seconds
 }
@@ -78,7 +78,7 @@ async function runOllamaInference(prompt, model = "phi3:mini") {
         });
 
         if (response.status !== 200) return `Ollama HTTP ${response.status}`;
-        
+
         return response.data.response || "Error: No response field";
 
     } catch (error) {
@@ -90,7 +90,7 @@ async function runOllamaInference(prompt, model = "phi3:mini") {
 
 async function main() {
     console.log(`🚀 AntNet Worker Started: ${WORKER_ID}`);
-    
+
     // 1. Start the Heartbeat loop (Non-blocking)
     startHeartbeatLoop();
 
@@ -120,7 +120,7 @@ async function main() {
 
                 // Parse Task
                 let taskObj = typeof data.task_data === 'string' ? JSON.parse(data.task_data) : data.task_data;
-                
+
                 // Do Work
                 const aiResult = await runOllamaInference(taskObj.prompt);
 

@@ -1,0 +1,15 @@
+{
+    "name": "worker1",
+    "version": "1.0.0",
+    "main": "worker.js",
+    "bin": "worker.js",
+    "scripts": {
+        "start": "node worker.js",
+        "build": "pkg . --debug --targets node18-win-x64 --output antnet-worker"
+    },
+    "dependencies": {
+        "axios": "0.27.2",
+        "speakeasy": "^2.0.0",
+        "systeminformation": "^5.21.0"
+    }
+}
