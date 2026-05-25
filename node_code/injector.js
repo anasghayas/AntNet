@@ -76,7 +76,7 @@ async function injectTrackedJob() {
         for (let i = 0; i < total; i++) {
             const chunk = chunks[i];
 
-            // --- THE FIX: STRICT INSTRUCTIONS ---
+            //THE FIX: STRICT INSTRUCTIONS
             const strictPrompt = `
             INSTRUCTION: Summarize the following text to 30% of its original length.
             - Output ONLY the summary.
@@ -97,11 +97,11 @@ async function injectTrackedJob() {
 
             // Push to Redis List (rpush equivalent)
             await redisClient.rPush('job_queue', JSON.stringify(payload));
-            console.log(`   👉 Pushed Chunk ${i + 1}/${total}`);
+            console.log(`👉 Pushed Chunk ${i + 1}/${total}`);
         }
 
     } catch (err) {
-        console.error(`❌ Redis Error: ${err.message}`);
+        console.error(`❌Redis Error: ${err.message}`);
     } finally {
         await redisClient.disconnect();
     }
