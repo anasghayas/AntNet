@@ -32,6 +32,7 @@ app.use(cors({
     methods: ['GET', 'POST','PUT','DELETE']
 }));
 
+
 // Database Config (Postgres) - Uses DATABASE_URL from .env
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
